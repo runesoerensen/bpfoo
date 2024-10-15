@@ -13,8 +13,15 @@ BUILDPACK_DIR=$(cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")" && pwd)
 
 cd "$BUILD_DIR"
 
-export CNB_BUILDPACK_DIR="${BUILDPACK_DIR}/cnb"
+export CNB_BUILDPACK_DIR="${BUILDPACK_DIR}/.cnb"
 export CNB_TARGET_OS="linux"
 export CNB_TARGET_ARCH="amd64"
 export CNB_TARGET_DISTRO_NAME="ubuntu"
 export CNB_TARGET_DISTRO_VERSION="24.04"
+
+mkdir $CNB_BUILDPACK_DIR
+touch $CNB_BUILDPACK_DIR/buildpack_plan.toml
+mkdir $CNB_BUILDPACK_DIR/layers
+mkdir $CNB_BUILDPACK_DIR/platform
+
+$CNB_BUILDPACK_DIR/bin/build "$CNB_BUILDPACK_DIR/layers" "$CNB_BUILDPACK_DIR/platform" "$CNB_BUILDPACK_DIR/buildpack_plan.toml"
