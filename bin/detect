@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Usage: bin/detect <build-dir>
+# See: https://devcenter.heroku.com/articles/buildpack-api
+
+set -euo pipefail
+BUILD_DIR="${1}"
+
+# Detect .NET project or solution files
+if ls "$BUILD_DIR"/*.sln "$BUILD_DIR"/*.csproj 1>/dev/null 2>&1; then
+  echo "dotnet"
+  exit 0
+else
+  echo "no .NET project detected"
+  exit 1
+fi
