@@ -25,3 +25,46 @@ mkdir $CNB_BUILDPACK_DIR/layers
 mkdir $CNB_BUILDPACK_DIR/platform
 
 $CNB_BUILDPACK_DIR/bin/build "$CNB_BUILDPACK_DIR/layers" "$CNB_BUILDPACK_DIR/platform" "$CNB_BUILDPACK_DIR/buildpack_plan.toml"
+
+# Function to handle variable operations (roughly) based on CNB buildpacks spec
+process_env_file() {
+    local env_file="$1"
+    local var_name=$(basename "$env_file" | cut -d '.' -f 1) # Get the variable name (before the first dot)
+    local operation=$(basename "$env_file" | cut -d '.' -f 2) # Get the operation (after the first dot)
+
+    if [[ "$var_name" == "PATH" ]]; then
+        case "$operation" in
+            "override")
+                echo "export PATH=\"$(cat "$env_file")\""
+                ;;
+            "prepend")
+                echo "export PATH=\"$(cat "$env_file"):\$PATH\""
+                ;;
+            "append")
+                echo "export PATH=\"\$PATH:$(cat "$env_file")\""
+                ;;
+        esac
+    else
+        case "$operation" in
+            "override")
+                echo "export $var_name=\"$(cat "$env_file")\""
+                ;;
+            "prepend")
+                echo "export $var_name=\"$(cat "$env_file"):\$$var_name\""
+                ;;
+            "append")
+                echo "export $var_name=\"\$$var_name:$(cat "$env_file")\""
+                ;;
+        esac
+    fi
+}
+
+PROFILE_PATH="$BUILD_DIR/.profile.d/dotnet.sh"
+
+# Create the profile directory if it doesn't exist
+mkdir -p "$(dirname "$PROFILE_PATH")"
+
+# Recursively find and process files in env and env.launch layer directories
+find "$CNB_BUILDPACK_DIR/layers" -type f \( -path "*/env/*" -o -path "*/env.launch/*" \) | while read -r file; do
+    process_env_file "$file" >> "$PROFILE_PATH"
+done
