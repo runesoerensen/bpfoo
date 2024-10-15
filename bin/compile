@@ -70,5 +70,8 @@ find "$CNB_BUILD_DIR/layers" -type f \( -path "*/env/*" -o -path "*/env.launch/*
     process_env_file "$file" >> "$PROFILE_PATH"
 done
 
+# Hack to replace the temp build directory path in environment variables
+sed -i "s|$BUILD_DIR|/app|g" $PROFILE_PATH
+
 rm -rf $CNB_BUILD_DIR/layers/sdk
 rm $CNB_BUILD_DIR/layers/sdk.toml
