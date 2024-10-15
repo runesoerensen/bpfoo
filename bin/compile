@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Usage: bin/compile <build-dir> <cache-dir> <env-dir>
+# See: https://devcenter.heroku.com/articles/buildpack-api
+
+set -euo pipefail
+
+BUILD_DIR="${1}"
+CACHE_DIR="${2}"
+ENV_DIR="${3}"
+
+# The absolute path to the root of the buildpack.
+BUILDPACK_DIR=$(cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")" && pwd)
+
+cd "$BUILD_DIR"
+
+export CNB_BUILDPACK_DIR="${BUILDPACK_DIR}/cnb"
+export CNB_TARGET_OS="linux"
+export CNB_TARGET_ARCH="amd64"
+export CNB_TARGET_DISTRO_NAME="ubuntu"
+export CNB_TARGET_DISTRO_VERSION="24.04"
