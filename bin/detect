@@ -2,11 +2,10 @@
 # Usage: bin/detect <build-dir>
 # See: https://devcenter.heroku.com/articles/buildpack-api
 
-set -euo pipefail
 BUILD_DIR="${1}"
 
 # Detect .NET project or solution files
-if ls "$BUILD_DIR"/*.sln "$BUILD_DIR"/*.csproj 1>/dev/null 2>&1; then
+if find "$BUILD_DIR" -maxdepth 1 -name "*.sln" -o -name "*.csproj" | grep -q .; then
   echo "dotnet"
   exit 0
 else
