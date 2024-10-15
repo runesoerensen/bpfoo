@@ -25,6 +25,12 @@ touch $CNB_BUILD_DIR/buildpack_plan.toml
 mkdir $CNB_BUILD_DIR/layers
 mkdir $CNB_BUILD_DIR/platform
 
+echo "Root contents"
+ls -lah /
+
+echo "app dir contents"
+ls -lah /app
+
 $CNB_BUILDPACK_DIR/bin/build "$CNB_BUILD_DIR/layers" "$CNB_BUILD_DIR/platform" "$CNB_BUILD_DIR/buildpack_plan.toml"
 
 # Function to handle variable operations (roughly) based on CNB buildpacks spec
