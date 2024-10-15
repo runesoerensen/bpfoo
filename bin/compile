@@ -68,3 +68,6 @@ mkdir -p "$(dirname "$PROFILE_PATH")"
 find "$CNB_BUILDPACK_DIR/layers" -type f \( -path "*/env/*" -o -path "*/env.launch/*" \) | while read -r file; do
     process_env_file "$file" >> "$PROFILE_PATH"
 done
+
+rm -rf $CNB_BUILDPACK_DIR/layers/sdk
+rm $CNB_BUILDPACK_DIR/layers/sdk.toml
