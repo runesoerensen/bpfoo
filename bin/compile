@@ -73,5 +73,8 @@ done
 # Hack to replace the temp build directory path in environment variables
 sed -i "s|$BUILD_DIR|/app|g" $PROFILE_PATH
 
+# Hack to reduce slug size for now
 rm -rf $CNB_BUILD_DIR/layers/sdk
+rm -rf $CNB_BUILD_DIR/layers/nuget-cache
 rm $CNB_BUILD_DIR/layers/sdk.toml
+rm $CNB_BUILD_DIR/layers/nuget-cache.toml
