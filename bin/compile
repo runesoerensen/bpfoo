@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # Usage: bin/compile <build-dir> <cache-dir> <env-dir>
-# See: https://devcenter.heroku.com/articles/buildpack-api
 
 set -euo pipefail
 
@@ -8,73 +7,126 @@ BUILD_DIR="${1}"
 CACHE_DIR="${2}"
 ENV_DIR="${3}"
 
-# The absolute path to the root of the buildpack.
+# Paths and directories
 BUILDPACK_DIR=$(cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")" && pwd)
-
-cd "$BUILD_DIR"
-
-export CNB_BUILDPACK_DIR="${BUILDPACK_DIR}/cnb"
-export CNB_TARGET_OS="linux"
-export CNB_TARGET_ARCH="amd64"
-export CNB_TARGET_DISTRO_NAME="ubuntu"
-export CNB_TARGET_DISTRO_VERSION="24.04"
-
-export CNB_BUILD_DIR="${BUILD_DIR}/.cnb"
-mkdir $CNB_BUILD_DIR
-touch $CNB_BUILD_DIR/buildpack_plan.toml
-mkdir $CNB_BUILD_DIR/layers
-mkdir $CNB_BUILD_DIR/platform
-
-$CNB_BUILDPACK_DIR/bin/build "$CNB_BUILD_DIR/layers" "$CNB_BUILD_DIR/platform" "$CNB_BUILD_DIR/buildpack_plan.toml"
-
-# Function to handle variable operations (roughly) based on CNB buildpacks spec
-process_env_file() {
-    local env_file="$1"
-    local var_name=$(basename "$env_file" | cut -d '.' -f 1) # Get the variable name (before the first dot)
-    local operation=$(basename "$env_file" | cut -d '.' -f 2) # Get the operation (after the first dot)
-
-    if [[ "$var_name" == "PATH" ]]; then
-        case "$operation" in
-            "override")
-                echo "export PATH=\"$(cat "$env_file")\""
-                ;;
-            "prepend")
-                echo "export PATH=\"$(cat "$env_file"):\$PATH\""
-                ;;
-            "append")
-                echo "export PATH=\"\$PATH:$(cat "$env_file")\""
-                ;;
-        esac
-    else
-        case "$operation" in
-            "override")
-                echo "export $var_name=\"$(cat "$env_file")\""
-                ;;
-            "prepend")
-                echo "export $var_name=\"$(cat "$env_file"):\$$var_name\""
-                ;;
-            "append")
-                echo "export $var_name=\"\$$var_name:$(cat "$env_file")\""
-                ;;
-        esac
-    fi
-}
-
+CNB_BUILD_DIR="${BUILD_DIR}/.cnb"
+CNB_CACHE_DIR="${CACHE_DIR}/.cnb/heroku_dotnet"
 PROFILE_PATH="$BUILD_DIR/.profile.d/dotnet.sh"
 
-# Create the profile directory if it doesn't exist
-mkdir -p "$(dirname "$PROFILE_PATH")"
+# Cached items (both directory and corresponding .toml file)
+BUILD_CACHE_ITEMS=("sdk" "nuget-cache")
 
-# Recursively find and process files in env and env.launch layer directories
-find "$CNB_BUILD_DIR/layers" -type f \( -path "*/env/*" -o -path "*/env.launch/*" \) | while read -r file; do
-    process_env_file "$file" >> "$PROFILE_PATH"
+# Initialize environment
+initialize_environment() {
+    mkdir -p "$CNB_BUILD_DIR"/{layers,platform}
+    mkdir -p "$(dirname "$PROFILE_PATH")"
+    touch "$CNB_BUILD_DIR/buildpack_plan.toml"
+
+    export CNB_BUILDPACK_DIR="${BUILDPACK_DIR}/cnb"
+    export CNB_TARGET_OS="linux"
+    export CNB_TARGET_ARCH="amd64"
+    export CNB_TARGET_DISTRO_NAME="ubuntu"
+    export CNB_TARGET_DISTRO_VERSION="24.04"
+    export CNB_BUILD_DIR CNB_CACHE_DIR
+
+    cd $BUILD_DIR
+}
+
+# Cache operations
+restore_build_cache() {
+    echo "Restoring cache..."
+    for item in "${BUILD_CACHE_ITEMS[@]}"; do
+        # Restore directory if it exists in the cache
+        if [ -d "$CNB_CACHE_DIR/layers/$item" ]; then
+            echo "Restoring $item directory from cache..."
+            mv "$CNB_CACHE_DIR/layers/$item" "$CNB_BUILD_DIR/layers/"
+        fi
+        # Restore .toml file if it exists in the cache
+        if [ -f "$CNB_CACHE_DIR/layers/$item.toml" ]; then
+            echo "Restoring $item.toml from cache..."
+            mv "$CNB_CACHE_DIR/layers/$item.toml" "$CNB_BUILD_DIR/layers/"
+        fi
+    done
+}
+
+save_build_cache() {
+    echo "Saving cache..."
+    mkdir -p "$CNB_CACHE_DIR/layers"
+    for item in "${BUILD_CACHE_ITEMS[@]}"; do
+        # Save directory to cache if it exists
+        if [ -d "$CNB_BUILD_DIR/layers/$item" ]; then
+            echo "Caching $item directory..."
+            rm -rf "$CNB_CACHE_DIR/layers/$item"  # Ensure old cache is cleared
+            mv "$CNB_BUILD_DIR/layers/$item" "$CNB_CACHE_DIR/layers/"
+        fi
+        # Save .toml file to cache if it exists
+        if [ -f "$CNB_BUILD_DIR/layers/$item.toml" ]; then
+            echo "Caching $item.toml..."
+            mv "$CNB_BUILD_DIR/layers/$item.toml" "$CNB_CACHE_DIR/layers/"
+        fi
+    done
+}
+
+# Function to format output lines with consistent color handling and custom prefixes
+format_output() {
+    while IFS= read -r line; do
+        color_code=''  # Holds any detected initial color code
+        clean_line="$line"
+
+        # Detect and store an ANSI color code at the start of the line, if present
+        if [[ "$line" =~ ^($'\x1b['[0-9;]*'m') ]]; then
+            color_code="${BASH_REMATCH[1]}"
+            clean_line="${line#"$color_code"}"  # Remove color code for processing
+        fi
+
+        # Set prefix based on line pattern
+        case "$clean_line" in
+            "##"*)    prefix='----->'; content="${clean_line:2}" ;;
+            "-"*)     prefix='----->'; content="${clean_line:1}" ;;
+            "  -"*)   prefix='      '; content="${clean_line:3}" ;;
+            "!"*)     prefix=' !    '; content="${clean_line:1}" ;;
+            *)        prefix='   ';    content="$clean_line" ;;
+        esac
+
+        # Output formatted line with original color code, custom prefix, and content
+        echo "${color_code}${prefix}${content}"
+    done
+}
+
+# Run build with formatted output
+run_build() {
+    $CNB_BUILDPACK_DIR/bin/build "$CNB_BUILD_DIR/layers" "$CNB_BUILD_DIR/platform" "$CNB_BUILD_DIR/buildpack_plan.toml" | format_output
+}
+
+# Process environment variable files
+process_env_files() {
+    rm -f $PROFILE_PATH
+    find "$CNB_BUILD_DIR/layers" -type f \( -path "*/env/*" -o -path "*/env.launch/*" \) | while read -r file; do
+        process_env_file "$file" >> "$PROFILE_PATH"
+    done
+    sed -i "s|$BUILD_DIR|/app|g" "$PROFILE_PATH"
+}
+
+process_env_file() {
+    local env_file="$1"
+    local var_name=$(basename "$env_file" | cut -d '.' -f 1)
+    local operation=$(basename "$env_file" | cut -d '.' -f 2)
+
+    case "$operation" in
+        "override") echo "export $var_name=\"$(cat "$env_file")\"" ;;
+        "prepend")  echo "export $var_name=\"$(cat "$env_file"):\$$var_name\"" ;;
+        "append")   echo "export $var_name=\"\$$var_name:$(cat "$env_file")\"" ;;
+    esac
+}
+
+# Main execution
+initialize_environment
+restore_build_cache
+run_build
+process_env_files
+save_build_cache
+
+# Remove cached layers from build directory to reduce slug size
+for item in "${BUILD_CACHE_ITEMS[@]}"; do
+    rm -rf "$CNB_BUILD_DIR/layers/$item" "$CNB_BUILD_DIR/layers/$item.toml"
 done
-
-# Hack to replace the temp build directory path in environment variables
-sed -i "s|$BUILD_DIR|/app|g" $PROFILE_PATH
-
-# Hack to reduce slug size for now
-rm -rf $CNB_BUILD_DIR/layers/sdk
-rm -rf $CNB_BUILD_DIR/layers/nuget-cache
-rm $CNB_BUILD_DIR/layers/sdk.toml
-rm $CNB_BUILD_DIR/layers/nuget-cache.toml
