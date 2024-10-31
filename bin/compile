@@ -160,11 +160,11 @@ process_launch_toml() {
 }
 
 initialize_environment
-restore_build_cache
+# restore_build_cache
 run_build
 process_env_files
 process_launch_toml
-save_build_cache
+# save_build_cache
 
 # Remove cached layers from build directory to reduce slug size
 # Note: These directories are moved to the cache when saving the build cache,
