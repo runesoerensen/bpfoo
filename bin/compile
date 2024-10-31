@@ -15,7 +15,7 @@ PROFILE_PATH="$BUILD_DIR/.profile.d/dotnet.sh"
 
 # Cached items (both directory and corresponding .toml file will be
 # cached and restored)
-BUILD_CACHE_ITEMS=("sdk" "nuget-cache")
+BUILD_CACHE_LAYERS=("sdk" "nuget-cache")
 
 # Initialize environment
 initialize_environment() {
@@ -42,31 +42,33 @@ initialize_environment() {
     cd $BUILD_DIR
 }
 
-# Cache operations
+move_cnb_layer() {
+    local src_dir="$1/layers"
+    local dest_dir="$2/layers"
+    local layer_name="$3"
+
+    # Move layer directory if it exists
+    if [ -d "$src_dir/$layer_name" ]; then
+        mv "$src_dir/$layer_name" "$dest_dir/"
+    fi
+
+    # Move layer metadata file (.toml) if it exists
+    if [ -f "$src_dir/$layer_name.toml" ]; then
+        mv "$src_dir/$layer_name.toml" "$dest_dir/"
+    fi
+}
+
 restore_build_cache() {
-    for item in "${BUILD_CACHE_ITEMS[@]}"; do
-        # Restore directory if it exists in the cache
-        if [ -d "$CNB_CACHE_DIR/layers/$item" ]; then
-            mv "$CNB_CACHE_DIR/layers/$item" "$CNB_BUILD_DIR/layers/"
-        fi
-        # Restore .toml file if it exists in the cache
-        if [ -f "$CNB_CACHE_DIR/layers/$item.toml" ]; then
-            mv "$CNB_CACHE_DIR/layers/$item.toml" "$CNB_BUILD_DIR/layers/"
-        fi
+    for layer_name in "${BUILD_CACHE_LAYERS[@]}"; do
+        move_cnb_layer "$CNB_CACHE_DIR" "$CNB_BUILD_DIR" "$layer_name"
     done
 }
 
 save_build_cache() {
     rm -rf "$CNB_CACHE_DIR" # Ensure old cache is cleared
     mkdir -p "$CNB_CACHE_DIR/layers"
-    for item in "${BUILD_CACHE_ITEMS[@]}"; do
-        # Save directory to cache if it exists
-        if [ -d "$CNB_BUILD_DIR/layers/$item" ]; then
-            mv "$CNB_BUILD_DIR/layers/$item" "$CNB_CACHE_DIR/layers/"
-        fi
-        if [ -f "$CNB_BUILD_DIR/layers/$item.toml" ]; then
-            mv "$CNB_BUILD_DIR/layers/$item.toml" "$CNB_CACHE_DIR/layers/"
-        fi
+    for layer_name in "${BUILD_CACHE_LAYERS[@]}"; do
+        move_cnb_layer "$CNB_BUILD_DIR" "$CNB_CACHE_DIR" "$layer_name"
     done
 }
 
@@ -167,6 +169,6 @@ save_build_cache
 # Remove cached layers from build directory to reduce slug size
 # Note: These directories are moved to the cache when saving the build cache,
 # so this is here to ensure the layers are removed when caching is disabled.
-for item in "${BUILD_CACHE_ITEMS[@]}"; do
+for item in "${BUILD_CACHE_LAYERS[@]}"; do
     rm -rf "$CNB_BUILD_DIR/layers/$item" "$CNB_BUILD_DIR/layers/$item.toml"
 done
