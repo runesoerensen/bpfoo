@@ -9,18 +9,28 @@ ENV_DIR="${3}"
 
 # Paths and directories
 BUILDPACK_DIR=$(cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")" && pwd)
-CNB_BUILD_DIR="${BUILD_DIR}/.cnb"
-CNB_CACHE_DIR="${CACHE_DIR}/.cnb/heroku_dotnet"
+CNB_BUILD_DIR="/app/.heroku/cnb/dotnet"
+CNB_CACHE_DIR="${CACHE_DIR}/.heroku/cnb/dotnet"
 PROFILE_PATH="$BUILD_DIR/.profile.d/dotnet.sh"
 
-# Cached items (both directory and corresponding .toml file)
+# Cached items (both directory and corresponding .toml file will be
+# cached and restored)
 BUILD_CACHE_ITEMS=("sdk" "nuget-cache")
 
 # Initialize environment
 initialize_environment() {
-    mkdir -p "$CNB_BUILD_DIR"/{layers,platform}
     mkdir -p "$(dirname "$PROFILE_PATH")"
+    mkdir -p "$BUILD_DIR/.heroku/cnb/dotnet"
+    mkdir -p "$(dirname "$CNB_BUILD_DIR")"
+
+    # Setup symlink from "/app/.heroku/cnb/dotnet" pointing to
+    # the actual build directory. This allows the CNB to write
+    # path environment variables that work both at runtime and
+    # during the builds (particularly useful when a cached layer
+    # is restored, and the build dir has changed).
+    ln -nsf "$BUILD_DIR/.heroku/cnb/dotnet" "$CNB_BUILD_DIR"
     touch "$CNB_BUILD_DIR/buildpack_plan.toml"
+    mkdir -p "$CNB_BUILD_DIR"/{layers,platform}
 
     export CNB_BUILDPACK_DIR="${BUILDPACK_DIR}/cnb"
     export CNB_TARGET_OS="linux"
@@ -39,12 +49,12 @@ restore_build_cache() {
         # Restore directory if it exists in the cache
         if [ -d "$CNB_CACHE_DIR/layers/$item" ]; then
             echo "Restoring $item directory from cache..."
-            mv "$CNB_CACHE_DIR/layers/$item" "$CNB_BUILD_DIR/layers/"
+            cp -r "$CNB_CACHE_DIR/layers/$item" "$CNB_BUILD_DIR/layers/"
         fi
         # Restore .toml file if it exists in the cache
         if [ -f "$CNB_CACHE_DIR/layers/$item.toml" ]; then
             echo "Restoring $item.toml from cache..."
-            mv "$CNB_CACHE_DIR/layers/$item.toml" "$CNB_BUILD_DIR/layers/"
+            cp "$CNB_CACHE_DIR/layers/$item.toml" "$CNB_BUILD_DIR/layers/"
         fi
     done
 }
@@ -67,8 +77,8 @@ save_build_cache() {
     done
 }
 
-# Function to format output lines with consistent color handling and custom prefixes
-format_output() {
+# Function to format CNB output with consistent color handling and custom prefixes
+format_cnb_output() {
     while IFS= read -r line; do
         color_code=''  # Holds any detected initial color code
         clean_line="$line"
@@ -95,7 +105,7 @@ format_output() {
 
 # Run build with formatted output
 run_build() {
-    $CNB_BUILDPACK_DIR/bin/build "$CNB_BUILD_DIR/layers" "$CNB_BUILD_DIR/platform" "$CNB_BUILD_DIR/buildpack_plan.toml" | format_output
+    $CNB_BUILDPACK_DIR/bin/build "$CNB_BUILD_DIR/layers" "$CNB_BUILD_DIR/platform" "$CNB_BUILD_DIR/buildpack_plan.toml" | format_cnb_output
 }
 
 # Process environment variable files
@@ -104,7 +114,6 @@ process_env_files() {
     find "$CNB_BUILD_DIR/layers" -type f \( -path "*/env/*" -o -path "*/env.launch/*" \) | while read -r file; do
         process_env_file "$file" >> "$PROFILE_PATH"
     done
-    sed -i "s|$BUILD_DIR|/app|g" "$PROFILE_PATH"
 }
 
 process_env_file() {
@@ -119,7 +128,6 @@ process_env_file() {
     esac
 }
 
-# Main execution
 initialize_environment
 restore_build_cache
 run_build
@@ -127,6 +135,8 @@ process_env_files
 save_build_cache
 
 # Remove cached layers from build directory to reduce slug size
+# Note: These directories are moved to the cache when saving the build cache,
+# so this is here to ensure the layers are removed when caching is disabled.
 for item in "${BUILD_CACHE_ITEMS[@]}"; do
     rm -rf "$CNB_BUILD_DIR/layers/$item" "$CNB_BUILD_DIR/layers/$item.toml"
 done
