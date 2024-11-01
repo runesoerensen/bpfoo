@@ -123,47 +123,10 @@ process_env_file() {
     esac
 }
 
-# Note: We may not want to actually add process types to the Procfile,
-# and simply skip this step entirely (possibly by changing the CNB to
-# detect the target and dropping the launch process registration).
-# However, since the CNB currently prints when launch processes have
-# been added, I've included this hack for now.
-process_launch_toml() {
-    local launch_toml_file="$CNB_BUILD_DIR/layers/launch.toml"
-    local output_file="$BUILD_DIR/Procfile"
-
-    # Check if launch.toml file exists
-    if [[ -f "$launch_toml_file" ]]; then
-        local type=""
-        local command=""
-
-        while IFS= read -r line; do
-            # Match the 'type' line and extract the value
-            if [[ $line =~ ^type[[:space:]]*=[[:space:]]*\"([^\"]+)\" ]]; then
-                type="${BASH_REMATCH[1]}"
-            fi
-
-            # Match the 'command' line and extract the command
-            if [[ $line =~ ^command[[:space:]]*=[[:space:]]*\[\"bash\",[[:space:]]*\"-c\",[[:space:]]*\"(.*)\"[[:space:]]*\] ]]; then
-                command="${BASH_REMATCH[1]}"
-
-                # Check if the type already exists in the Procfile
-                if ! grep -q "^$type:" "$output_file" 2>/dev/null; then
-                    # Append the type and command to the Procfile in the required format
-                    echo "$type: $command" >> "$output_file"
-                fi
-                type=""
-                command=""
-            fi
-        done < "$launch_toml_file"
-    fi
-}
-
 initialize_environment
 # restore_build_cache
 run_build
 process_env_files
-process_launch_toml
 # save_build_cache
 
 # Remove cached layers from build directory to reduce slug size
