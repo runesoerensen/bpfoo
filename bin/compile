@@ -7,6 +7,8 @@ BUILD_DIR="${1}"
 CACHE_DIR="${2}"
 ENV_DIR="${3}"
 
+DOTNET_CNB_VERSION="0.1.6"
+
 # Paths and directories
 BUILDPACK_DIR=$(cd "$(dirname "$(dirname "${BASH_SOURCE[0]}")")" && pwd)
 CNB_BUILD_DIR="/app/.heroku/cnb/dotnet"
@@ -40,6 +42,57 @@ initialize_environment() {
     export CNB_BUILD_DIR CNB_CACHE_DIR
 
     cd $BUILD_DIR
+}
+
+download_and_extract_cnb() {
+    local buildpack_url="https://github.com/heroku/buildpacks-dotnet/releases/download/v${DOTNET_CNB_VERSION}/heroku_dotnet_${CNB_TARGET_OS}-${CNB_TARGET_ARCH}.cnb"
+
+    # Use a temporary directory for intermediate files, automatically cleaned up on exit
+    local temp_dir
+    temp_dir=$(mktemp -d) || { echo "Failed to create temp directory"; exit 1; }
+
+    # Step 1: Download the CNB buildpack file
+    echo "Downloading CNB buildpack from $buildpack_url..."
+    local cnb_archive="$temp_dir/buildpack.cnb"
+    curl -L "$buildpack_url" -o "$cnb_archive"
+
+    # Step 2: Ensure the oci-image directory exists and extract the CNB buildpack file
+    echo "Extracting CNB buildpack..."
+    mkdir -p "$temp_dir/oci-image"  # Create the oci-image directory
+    tar -xf "$cnb_archive" -C "$temp_dir/oci-image"
+
+    # Step 3: Locate the manifest digest from index.json
+    local index_file="$temp_dir/oci-image/index.json"
+    local manifest_digest
+    manifest_digest=$(jq -r '.manifests[0].digest' "$index_file")
+
+    # Step 4: Extract the manifest file using the digest
+    local manifest_file="$temp_dir/oci-image/blobs/sha256/${manifest_digest#sha256:}"
+    if [ ! -f "$manifest_file" ]; then
+        echo "Error: Manifest file $manifest_file not found."
+        return 1
+    fi
+
+    # Step 5: Prepare the target directory and extract layers from the manifest file
+    mkdir -p "$CNB_BUILDPACK_DIR"
+    echo "Extracting layers from manifest..."
+    jq -r '.layers[].digest' "$manifest_file" | while read -r layer_digest; do
+        local layer_file="$temp_dir/oci-image/blobs/sha256/${layer_digest#sha256:}"
+        
+        # Extract each layer, skipping if the file is missing
+        if [ -f "$layer_file" ]; then
+            echo "Extracting layer $layer_file..."
+            tar --strip-components=4 -xf "$layer_file" -C "$CNB_BUILDPACK_DIR"
+        else
+            echo "Warning: Layer $layer_file not found, skipping."
+        fi
+    done
+
+    find "$CNB_BUILDPACK_DIR"
+
+    rm -rf "$temp_dir"
+
+    echo "Extraction complete. Relevant files are located in $CNB_BUILDPACK_DIR."
 }
 
 move_cnb_layer() {
@@ -100,6 +153,7 @@ format_cnb_output() {
 
 # Run build with formatted output
 run_build() {
+    find "$(pwd)"
     $CNB_BUILDPACK_DIR/bin/build "$CNB_BUILD_DIR/layers" "$CNB_BUILD_DIR/platform" "$CNB_BUILD_DIR/buildpack_plan.toml" | format_cnb_output
 }
 
@@ -124,6 +178,7 @@ process_env_file() {
 }
 
 initialize_environment
+download_and_extract_cnb
 # restore_build_cache
 run_build
 process_env_files
