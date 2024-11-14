@@ -49,50 +49,44 @@ download_and_extract_cnb() {
 
     # Use a temporary directory for intermediate files, automatically cleaned up on exit
     local temp_dir
-    temp_dir=$(mktemp -d) || { echo "Failed to create temp directory"; exit 1; }
+    temp_dir=$(mktemp -d) || { echo "Error: Failed to create temp directory"; exit 1; }
 
-    # Step 1: Download the CNB buildpack file
-    echo "Downloading CNB buildpack from $buildpack_url..."
+    # Download the CNB buildpack file
     local cnb_archive="$temp_dir/buildpack.cnb"
-    curl -L "$buildpack_url" -o "$cnb_archive"
+    curl -sSL "$buildpack_url" -o "$cnb_archive" || { echo "Error: Failed to download CNB buildpack from $buildpack_url"; exit 1; }
 
-    # Step 2: Ensure the oci-image directory exists and extract the CNB buildpack file
-    echo "Extracting CNB buildpack..."
-    mkdir -p "$temp_dir/oci-image"  # Create the oci-image directory
-    tar -xf "$cnb_archive" -C "$temp_dir/oci-image"
+    # Ensure the oci-image directory exists and extract the CNB buildpack file
+    mkdir -p "$temp_dir/oci-image"
+    tar -xf "$cnb_archive" -C "$temp_dir/oci-image" 2>/dev/null || { echo "Error: Failed to extract CNB buildpack archive"; exit 1; }
 
-    # Step 3: Locate the manifest digest from index.json
+    # Locate the manifest digest from index.json
     local index_file="$temp_dir/oci-image/index.json"
     local manifest_digest
-    manifest_digest=$(jq -r '.manifests[0].digest' "$index_file")
+    manifest_digest=$(jq -r '.manifests[0].digest' "$index_file") || { echo "Error: Failed to parse manifest digest from index.json"; exit 1; }
 
-    # Step 4: Extract the manifest file using the digest
+    # Extract the manifest file using the digest
     local manifest_file="$temp_dir/oci-image/blobs/sha256/${manifest_digest#sha256:}"
     if [ ! -f "$manifest_file" ]; then
         echo "Error: Manifest file $manifest_file not found."
         return 1
     fi
 
-    # Step 5: Prepare the target directory and extract layers from the manifest file
+    # Prepare the target directory and extract layers from the manifest file
     mkdir -p "$CNB_BUILDPACK_DIR"
-    echo "Extracting layers from manifest..."
     jq -r '.layers[].digest' "$manifest_file" | while read -r layer_digest; do
         local layer_file="$temp_dir/oci-image/blobs/sha256/${layer_digest#sha256:}"
         
-        # Extract each layer, skipping if the file is missing
+        # Extract each layer, removing the nested prefix directories
         if [ -f "$layer_file" ]; then
-            echo "Extracting layer $layer_file..."
-            tar --strip-components=4 -xf "$layer_file" -C "$CNB_BUILDPACK_DIR"
+            tar --strip-components=4 -xf "$layer_file" -C "$CNB_BUILDPACK_DIR" 2>/dev/null || {
+                echo "Warning: Failed to extract layer $layer_file"; 
+            }
         else
             echo "Warning: Layer $layer_file not found, skipping."
         fi
     done
 
-    find "$CNB_BUILDPACK_DIR"
-
     rm -rf "$temp_dir"
-
-    echo "Extraction complete. Relevant files are located in $CNB_BUILDPACK_DIR."
 }
 
 move_cnb_layer() {
@@ -153,7 +147,6 @@ format_cnb_output() {
 
 # Run build with formatted output
 run_build() {
-    find "$(pwd)"
     $CNB_BUILDPACK_DIR/bin/build "$CNB_BUILD_DIR/layers" "$CNB_BUILD_DIR/platform" "$CNB_BUILD_DIR/buildpack_plan.toml" | format_cnb_output
 }
 
