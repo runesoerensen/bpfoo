@@ -44,49 +44,27 @@ initialize_environment() {
     cd $BUILD_DIR
 }
 
+# We'll likely want to take a different approach to retrieve the CNB, and handle this
+# elsewhere (e.g. compiling and uploading the relevant files to an S3 bucket). For now,
+# simply download and extract the desired CNB artifact from the relevant GitHub release.
 download_and_extract_cnb() {
     local buildpack_url="https://github.com/heroku/buildpacks-dotnet/releases/download/v${DOTNET_CNB_VERSION}/heroku_dotnet_${CNB_TARGET_OS}-${CNB_TARGET_ARCH}.cnb"
-
-    # Use a temporary directory for intermediate files, automatically cleaned up on exit
-    local temp_dir
-    temp_dir=$(mktemp -d) || { echo "Error: Failed to create temp directory"; exit 1; }
-
-    # Download the CNB buildpack file
+    local temp_dir=$(mktemp -d)
     local cnb_archive="$temp_dir/buildpack.cnb"
-    curl -sSL "$buildpack_url" -o "$cnb_archive" || { echo "Error: Failed to download CNB buildpack from $buildpack_url"; exit 1; }
+    curl -sSL "$buildpack_url" -o "$cnb_archive"
 
-    # Ensure the oci-image directory exists and extract the CNB buildpack file
     mkdir -p "$temp_dir/oci-image"
-    tar -xf "$cnb_archive" -C "$temp_dir/oci-image" 2>/dev/null || { echo "Error: Failed to extract CNB buildpack archive"; exit 1; }
+    tar -xf "$cnb_archive" -C "$temp_dir/oci-image" 2>/dev/null
 
-    # Locate the manifest digest from index.json
-    local index_file="$temp_dir/oci-image/index.json"
-    local manifest_digest
-    manifest_digest=$(jq -r '.manifests[0].digest' "$index_file") || { echo "Error: Failed to parse manifest digest from index.json"; exit 1; }
-
-    # Extract the manifest file using the digest
+    local manifest_digest=$(jq -r '.manifests[0].digest' "$temp_dir/oci-image/index.json")
     local manifest_file="$temp_dir/oci-image/blobs/sha256/${manifest_digest#sha256:}"
-    if [ ! -f "$manifest_file" ]; then
-        echo "Error: Manifest file $manifest_file not found."
-        return 1
-    fi
 
     # Prepare the target directory and extract layers from the manifest file
     mkdir -p "$CNB_BUILDPACK_DIR"
     jq -r '.layers[].digest' "$manifest_file" | while read -r layer_digest; do
-        local layer_file="$temp_dir/oci-image/blobs/sha256/${layer_digest#sha256:}"
-        
-        # Extract each layer, removing the nested prefix directories
-        if [ -f "$layer_file" ]; then
-            tar --strip-components=4 -xf "$layer_file" -C "$CNB_BUILDPACK_DIR" 2>/dev/null || {
-                echo "Warning: Failed to extract layer $layer_file"; 
-            }
-        else
-            echo "Warning: Layer $layer_file not found, skipping."
-        fi
+        # Extract each layer, removing the nested prefix directories (e.g. `cnb/buildpacks/heroku_dotnet/0.1.6`)
+        tar --strip-components=4 -xf "$temp_dir/oci-image/blobs/sha256/${layer_digest#sha256:}" -C "$CNB_BUILDPACK_DIR" 2>/dev/null
     done
-
-    rm -rf "$temp_dir"
 }
 
 move_cnb_layer() {
